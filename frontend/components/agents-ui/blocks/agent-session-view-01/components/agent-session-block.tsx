@@ -156,7 +156,7 @@ export interface AgentSessionView_01Props {
 }
 
 export function AgentSessionView_01({
-  preConnectMessage = 'Agent is listening, ask it a question',
+  preConnectMessage = 'Chinnu is ready to play! Say something… 🐥',
   supportsChatInput = true,
   supportsVideoInput = true,
   supportsScreenShare = true,

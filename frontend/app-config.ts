@@ -33,36 +33,27 @@ export interface AppConfig {
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfig = {
-  companyName: 'Murf AI',
-  pageTitle: 'Voice Agent Starter',
-  pageDescription: 'A voice agent powered by Murf Falcon — the fastest TTS API',
+  companyName: 'BoloBuddy',
+  pageTitle: 'BoloBuddy — Learn Words with Chinnu!',
+  pageDescription:
+    'BoloBuddy helps children aged 2–6 learn language naturally through fun voice conversations with Chinnu, their AI companion. Powered by Murf Falcon TTS.',
 
-  supportsChatInput: true,
-  supportsVideoInput: true,
-  supportsScreenShare: true,
+  supportsChatInput: false,
+  supportsVideoInput: false,
+  supportsScreenShare: false,
   isPreConnectBufferEnabled: true,
 
   logo: '/murf-logo.svg',
-  accent: '#6366F1',
+  accent: '#F97316',
   logoDark: '/murf-logo-dark.svg',
-  accentDark: '#818cf8',
-  startButtonText: 'Start talking',
+  accentDark: '#fb923c',
+  startButtonText: 'Talk to Chinnu! 🎙️',
 
-  // optional: audio visualization configuration
-  // audioVisualizerType: 'bar',
-  // audioVisualizerColor: '#002cf2',
-  // audioVisualizerColorDark: '#1fd5f9',
-  // audioVisualizerColorShift: 0.3,
-  // audioVisualizerBarCount: 5,
-  // audioVisualizerType: 'radial',
-  // audioVisualizerRadialBarCount: 24,
-  // audioVisualizerRadialRadius: 100,
-  // audioVisualizerType: 'grid',
-  // audioVisualizerGridRowCount: 25,
-  // audioVisualizerGridColumnCount: 25,
-  // audioVisualizerType: 'wave',
-  // audioVisualizerWaveLineWidth: 3,
-  // audioVisualizerType: 'aura',
+  // BoloBuddy uses the aura visualizer — it looks magical for children
+  audioVisualizerType: 'aura',
+  audioVisualizerColor: '#F97316',
+  audioVisualizerColorDark: '#fb923c',
+  audioVisualizerColorShift: 0.4,
 
   // agent dispatch configuration
   agentName: process.env.AGENT_NAME ?? undefined,

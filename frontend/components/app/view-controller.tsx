@@ -1,8 +1,9 @@
 'use client';
 
-import { useTheme } from 'next-themes';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useSessionContext } from '@livekit/components-react';
+import { useAgent } from '@livekit/components-react';
 import type { AppConfig } from '@/app-config';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
 import { WelcomeView } from '@/components/app/welcome-view';
@@ -12,65 +13,310 @@ const MotionSessionView = motion.create(AgentSessionView_01);
 
 const VIEW_MOTION_PROPS = {
   variants: {
-    visible: {
-      opacity: 1,
-    },
-    hidden: {
-      opacity: 0,
-    },
+    visible: { opacity: 1, scale: 1 },
+    hidden: { opacity: 0, scale: 0.97 },
   },
-  initial: 'hidden',
-  animate: 'visible',
-  exit: 'hidden',
-  transition: {
-    duration: 0.5,
-    ease: 'linear',
-  },
+  initial: 'hidden' as const,
+  animate: 'visible' as const,
+  exit: 'hidden' as const,
+  transition: { duration: 0.4, ease: 'easeInOut' },
 };
 
+/* ── Connecting Overlay ────────────────────────────────────── */
+function ConnectingOverlay() {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6"
+      style={{
+        background: 'linear-gradient(150deg, #fff7ed 0%, #fef3c7 40%, #ede9fe 100%)',
+      }}
+    >
+      {/* Spinner */}
+      <div className="relative flex items-center justify-center" style={{ width: 120, height: 120 }}>
+        <div
+          className="absolute rounded-full border-4 border-orange-200 animate-spin-slow"
+          style={{ width: 120, height: 120, borderTopColor: '#F97316' }}
+        />
+        <span className="text-5xl animate-bounce-gentle">🐥</span>
+      </div>
+      <div className="text-center">
+        <h2 className="text-2xl font-black text-gray-800 mb-2">Chinnu is getting ready…</h2>
+        <p className="text-gray-500 font-medium">Connecting you to your learning buddy!</p>
+      </div>
+      <div className="flex gap-2">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="w-2.5 h-2.5 rounded-full bg-orange-400"
+            style={{ animation: `bounce 1s ease-in-out ${i * 0.2}s infinite` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Call Ended Screen ─────────────────────────────────────── */
+function CallEndedScreen({ onRestart }: { onRestart: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 px-4 text-center"
+      style={{
+        background: 'linear-gradient(150deg, #fff7ed 0%, #fef3c7 40%, #ede9fe 100%)',
+      }}
+    >
+      <span className="text-8xl animate-bounce-gentle">🎉</span>
+      <div>
+        <h2 className="text-3xl font-black text-gray-800 mb-3">Great job today!</h2>
+        <p className="text-gray-600 font-semibold text-lg max-w-sm">
+          Chinnu had so much fun learning with you. Come back soon! 👋
+        </p>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-4 items-center mt-2">
+        <button
+          id="restart-call-btn"
+          onClick={onRestart}
+          className="flex items-center gap-2 rounded-full px-8 py-4 text-base font-black text-white shadow-xl transition-all duration-200 hover:scale-105 active:scale-95"
+          style={{
+            background: 'linear-gradient(135deg, #F97316, #EA580C)',
+            boxShadow: '0 6px 24px rgba(249,115,22,0.4)',
+          }}
+        >
+          <span className="text-xl">🎙️</span>
+          Talk to Chinnu Again!
+        </button>
+      </div>
+      <p className="text-xs text-gray-400 font-medium">
+        Powered by Murf Falcon TTS · #VoiceForBharat
+      </p>
+    </div>
+  );
+}
+
+/* ── Mic Permission Error Screen ───────────────────────────── */
+function MicPermissionError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 px-6 text-center"
+      style={{
+        background: 'linear-gradient(150deg, #fff7ed 0%, #fef3c7 40%, #ede9fe 100%)',
+      }}
+    >
+      <span className="text-7xl">🎤</span>
+      <div className="max-w-sm">
+        <h2 className="text-2xl font-black text-gray-800 mb-3">
+          Microphone Access Needed
+        </h2>
+        <p className="text-gray-600 font-semibold text-base leading-relaxed mb-4">
+          Chinnu needs to hear your child speak! Please allow microphone access so the
+          learning can begin. 🐥
+        </p>
+        {/* Step-by-step instructions */}
+        <div
+          className="rounded-2xl p-4 text-left text-sm space-y-2"
+          style={{ background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.3)' }}
+        >
+          <p className="font-black text-gray-700 mb-2">How to enable your microphone:</p>
+          <p className="text-gray-600 font-medium">
+            🔒 <strong>Chrome/Edge:</strong> Click the lock icon in the address bar → Microphone → Allow
+          </p>
+          <p className="text-gray-600 font-medium">
+            🦊 <strong>Firefox:</strong> Click the microphone icon in the address bar → Allow
+          </p>
+          <p className="text-gray-600 font-medium">
+            🍎 <strong>Safari:</strong> Settings → Websites → Microphone → Allow
+          </p>
+        </div>
+      </div>
+      <button
+        id="retry-mic-btn"
+        onClick={onRetry}
+        className="flex items-center gap-2 rounded-full px-8 py-4 text-base font-black text-white shadow-xl transition-all duration-200 hover:scale-105 active:scale-95"
+        style={{
+          background: 'linear-gradient(135deg, #F97316, #EA580C)',
+          boxShadow: '0 6px 24px rgba(249,115,22,0.4)',
+        }}
+      >
+        Try Again 🔄
+      </button>
+    </div>
+  );
+}
+
+/* ── Agent State Banner ─────────────────────────────────────── */
+function AgentStateBanner({ agentState }: { agentState: string | undefined }) {
+  const stateConfig: Record<string, { text: string; emoji: string; color: string }> = {
+    listening: {
+      text: 'Chinnu is listening to you!',
+      emoji: '👂',
+      color: 'linear-gradient(90deg, #34d399, #059669)',
+    },
+    speaking: {
+      text: 'Chinnu is speaking!',
+      emoji: '🗣️',
+      color: 'linear-gradient(90deg, #F97316, #ea580c)',
+    },
+    thinking: {
+      text: 'Chinnu is thinking…',
+      emoji: '🤔',
+      color: 'linear-gradient(90deg, #7C3AED, #6d28d9)',
+    },
+  };
+
+  const config = agentState ? stateConfig[agentState] : null;
+
+  if (!config) return null;
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={agentState}
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -20 }}
+        transition={{ duration: 0.3 }}
+        className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full px-5 py-2 text-sm font-bold text-white shadow-lg"
+        style={{ background: config.color }}
+      >
+        <span className="text-base">{config.emoji}</span>
+        {config.text}
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+/* ── Main ViewController ───────────────────────────────────── */
 interface ViewControllerProps {
   appConfig: AppConfig;
 }
 
+type AppView = 'welcome' | 'connecting' | 'session' | 'ended';
+
 export function ViewController({ appConfig }: ViewControllerProps) {
-  const { isConnected, start } = useSessionContext();
-  const { resolvedTheme } = useTheme();
+  const { isConnected, start, end } = useSessionContext();
+  const { state: agentState } = useAgent();
+  const [view, setView] = useState<AppView>('welcome');
+  const [micError, setMicError] = useState(false);
+
+  // Sync connection state → view
+  useEffect(() => {
+    if (isConnected) {
+      setView('session');
+      setMicError(false);
+    }
+  }, [isConnected]);
+
+  const handleStartCall = async () => {
+    setView('connecting');
+    setMicError(false);
+    try {
+      // Check microphone permissions first
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      await start();
+    } catch (err: unknown) {
+      const error = err as Error;
+      if (
+        error.name === 'NotAllowedError' ||
+        error.name === 'PermissionDeniedError' ||
+        error.message?.toLowerCase().includes('permission')
+      ) {
+        setMicError(true);
+        setView('welcome');
+      } else {
+        // Other errors — still attempt connection
+        try {
+          await start();
+        } catch {
+          setView('welcome');
+        }
+      }
+    }
+  };
+
+  const handleEndCall = () => {
+    end();
+    setView('ended');
+  };
+
+  const handleRestart = () => {
+    setView('welcome');
+    setMicError(false);
+  };
+
+  const handleRetryMic = () => {
+    setMicError(false);
+    handleStartCall();
+  };
+
+  // Mic permission error screen (shown over any state)
+  if (micError) {
+    return <MicPermissionError onRetry={handleRetryMic} />;
+  }
+
+  // Connecting overlay
+  if (view === 'connecting' && !isConnected) {
+    return <ConnectingOverlay />;
+  }
+
+  // Call ended screen
+  if (view === 'ended') {
+    return <CallEndedScreen onRestart={handleRestart} />;
+  }
 
   return (
     <AnimatePresence mode="wait">
-      {/* Welcome view */}
-      {!isConnected && (
+      {/* ── Welcome / Landing Page ── */}
+      {view === 'welcome' && !isConnected && (
         <MotionWelcomeView
           key="welcome"
           {...VIEW_MOTION_PROPS}
           startButtonText={appConfig.startButtonText}
-          onStartCall={start}
+          onStartCall={handleStartCall}
         />
       )}
-      {/* Session view */}
-      {isConnected && (
-        <MotionSessionView
-          key="session-view"
+
+      {/* ── Active Session ── */}
+      {view === 'session' && isConnected && (
+        <motion.div
+          key="session"
+          className="fixed inset-0 z-10"
           {...VIEW_MOTION_PROPS}
-          supportsChatInput={appConfig.supportsChatInput}
-          supportsVideoInput={appConfig.supportsVideoInput}
-          supportsScreenShare={appConfig.supportsScreenShare}
-          isPreConnectBufferEnabled={appConfig.isPreConnectBufferEnabled}
-          audioVisualizerType={appConfig.audioVisualizerType}
-          audioVisualizerColor={
-            resolvedTheme === 'dark'
-              ? appConfig.audioVisualizerColorDark
-              : appConfig.audioVisualizerColor
-          }
-          audioVisualizerColorShift={appConfig.audioVisualizerColorShift}
-          audioVisualizerBarCount={appConfig.audioVisualizerBarCount}
-          audioVisualizerGridRowCount={appConfig.audioVisualizerGridRowCount}
-          audioVisualizerGridColumnCount={appConfig.audioVisualizerGridColumnCount}
-          audioVisualizerRadialBarCount={appConfig.audioVisualizerRadialBarCount}
-          audioVisualizerRadialRadius={appConfig.audioVisualizerRadialRadius}
-          audioVisualizerWaveLineWidth={appConfig.audioVisualizerWaveLineWidth}
-          className="fixed inset-0"
-        />
+        >
+          {/* Agent state banner: Listening / Speaking / Thinking */}
+          <AgentStateBanner agentState={agentState} />
+
+          <MotionSessionView
+            key="session-view"
+            {...VIEW_MOTION_PROPS}
+            supportsChatInput={appConfig.supportsChatInput}
+            supportsVideoInput={appConfig.supportsVideoInput}
+            supportsScreenShare={appConfig.supportsScreenShare}
+            isPreConnectBufferEnabled={appConfig.isPreConnectBufferEnabled}
+            audioVisualizerType={appConfig.audioVisualizerType}
+            audioVisualizerColor={appConfig.audioVisualizerColor}
+            audioVisualizerColorShift={appConfig.audioVisualizerColorShift}
+            audioVisualizerBarCount={appConfig.audioVisualizerBarCount}
+            audioVisualizerGridRowCount={appConfig.audioVisualizerGridRowCount}
+            audioVisualizerGridColumnCount={appConfig.audioVisualizerGridColumnCount}
+            audioVisualizerRadialBarCount={appConfig.audioVisualizerRadialBarCount}
+            audioVisualizerRadialRadius={appConfig.audioVisualizerRadialRadius}
+            audioVisualizerWaveLineWidth={appConfig.audioVisualizerWaveLineWidth}
+            preConnectMessage="Chinnu is ready to play! Say something… 🐥"
+            className="fixed inset-0"
+          />
+
+          {/* End call button overlay */}
+          <div className="fixed bottom-32 right-6 z-50">
+            <button
+              id="end-call-btn"
+              onClick={handleEndCall}
+              className="flex items-center gap-2 rounded-full px-5 py-3 text-sm font-black text-white shadow-lg transition-all hover:scale-105 active:scale-95"
+              style={{ background: 'linear-gradient(135deg, #dc2626, #b91c1c)' }}
+            >
+              👋 End Call
+            </button>
+          </div>
+        </motion.div>
       )}
     </AnimatePresence>
   );

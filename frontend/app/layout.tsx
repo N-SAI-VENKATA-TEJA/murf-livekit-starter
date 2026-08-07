@@ -1,4 +1,4 @@
-import { Public_Sans } from 'next/font/google';
+import { Nunito } from 'next/font/google';
 import localFont from 'next/font/local';
 import { headers } from 'next/headers';
 import { ThemeProvider } from '@/components/app/theme-provider';
@@ -7,9 +7,11 @@ import { cn } from '@/lib/shadcn/utils';
 import { getAppConfig, getStyles } from '@/lib/utils';
 import '@/styles/globals.css';
 
-const publicSans = Public_Sans({
+const nunito = Nunito({
   variable: '--font-public-sans',
   subsets: ['latin'],
+  weight: ['400', '600', '700', '800', '900'],
+  display: 'swap',
 });
 
 const commitMono = localFont({
@@ -47,60 +49,55 @@ export default async function RootLayout({ children }: RootLayoutProps) {
   const hdrs = await headers();
   const appConfig = await getAppConfig(hdrs);
   const styles = getStyles(appConfig);
-  const { pageTitle, pageDescription, companyName, logo, logoDark } = appConfig;
 
   return (
     <html
       lang="en"
       suppressHydrationWarning
       className={cn(
-        publicSans.variable,
+        nunito.variable,
         commitMono.variable,
         'scroll-smooth font-sans antialiased'
       )}
     >
       <head>
         {styles && <style>{styles}</style>}
-        <title>{pageTitle}</title>
-        <meta name="description" content={pageDescription} />
+        <title>BoloBuddy — Learn Words with Chinnu!</title>
+        <meta name="description" content="BoloBuddy helps children aged 2–6 learn language naturally through fun voice conversations with Chinnu, their AI companion. Powered by Murf Falcon TTS." />
       </head>
       <body className="overflow-x-hidden">
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="light"
           enableSystem
           disableTransitionOnChange
         >
-          <header className="fixed top-0 left-0 z-50 hidden w-full flex-row justify-between p-6 md:flex">
-            <a
-              target="_blank"
-              rel="noopener noreferrer"
-              href="https://livekit.io"
-              className="scale-100 transition-transform duration-300 hover:scale-110"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={logo} alt={`${companyName} Logo`} className="block size-6 dark:hidden" />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={logoDark ?? logo}
-                alt={`${companyName} Logo`}
-                className="hidden size-6 dark:block"
-              />
-            </a>
-            <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
-              Built with{' '}
+          {/* BoloBuddy Header */}
+          <header className="fixed top-0 left-0 z-50 w-full flex-row items-center justify-between px-6 py-4 hidden md:flex">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🐥</span>
+              <span
+                className="text-xl font-black tracking-tight"
+                style={{ color: '#F97316' }}
+              >
+                BoloBuddy
+              </span>
+            </div>
+            <span className="text-xs font-semibold text-gray-400 tracking-wide">
+              Powered by{' '}
               <a
                 target="_blank"
                 rel="noopener noreferrer"
-                href="https://docs.livekit.io/agents"
-                className="underline underline-offset-4"
+                href="https://murf.ai"
+                className="underline underline-offset-4 hover:text-orange-400 transition-colors"
               >
-                LiveKit Agents
+                Murf Falcon TTS
               </a>
             </span>
           </header>
 
           {children}
+
           <div className="group fixed bottom-0 left-1/2 z-50 mb-2 -translate-x-1/2">
             <ThemeToggle className="translate-y-20 transition-transform delay-150 duration-300 group-hover:translate-y-0" />
           </div>
