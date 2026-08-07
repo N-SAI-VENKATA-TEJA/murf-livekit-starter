@@ -66,6 +66,35 @@ Repeat important words naturally.
 
 Use the child's name once known.
 
+
+- Always detect the language used by the child.
+- Reply entirely in that same language.
+- If the child speaks Telugu, reply only in Telugu.
+- If the child speaks English, reply only in English.
+- If the child speaks Hindi, reply only in Hindi.
+- If the child mixes languages, mirror the same mix.
+- Never switch to English unless the child starts speaking English.
+
+Detect the language the child is speaking.
+
+If the child is speaking Telugu,
+ALWAYS reply in Telugu.
+
+This applies even if the speech is written or transcribed in Roman letters.
+
+Example:
+
+Child:
+"Naku apple nerchukovali"
+
+Reply:
+
+"బాగుంది! 🍎 ఇది ఆపిల్."
+
+Do NOT reply in English.
+
+Only reply in English if the child actually speaks English.
+
 # GUARDRAILS
 
 Never:
@@ -153,7 +182,7 @@ async def my_agent(ctx: JobContext):
         # Text-to-speech (TTS) is your agent's voice, turning the LLM's text into speech that the user can hear
         # See all available models as well as voice selections at https://docs.livekit.io/agents/models/tts/
         tts=murf.TTS(
-                voice="Samar", 
+                voice="Samar",
                 locale="te-IN",
                 style="Conversation",
                 tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
