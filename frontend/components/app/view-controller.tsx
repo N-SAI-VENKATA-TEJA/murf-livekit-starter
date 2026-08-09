@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useSessionContext } from '@livekit/components-react';
-import { useAgent } from '@livekit/components-react';
+import { useSessionContext, useAgent } from '@livekit/components-react';
 import type { AppConfig } from '@/app-config';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
+import type { AuthedChild } from '@/components/app/login-view';
+import { LoginView } from '@/components/app/login-view';
 import { WelcomeView } from '@/components/app/welcome-view';
 
 const MotionWelcomeView = motion.create(WelcomeView);
@@ -32,22 +33,25 @@ function ConnectingOverlay() {
       }}
     >
       {/* Spinner */}
-      <div className="relative flex items-center justify-center" style={{ width: 120, height: 120 }}>
+      <div
+        className="relative flex items-center justify-center"
+        style={{ width: 120, height: 120 }}
+      >
         <div
-          className="absolute rounded-full border-4 border-orange-200 animate-spin-slow"
+          className="animate-spin-slow absolute rounded-full border-4 border-orange-200"
           style={{ width: 120, height: 120, borderTopColor: '#F97316' }}
         />
-        <span className="text-5xl animate-bounce-gentle">🐥</span>
+        <span className="animate-bounce-gentle text-5xl">🐥</span>
       </div>
       <div className="text-center">
-        <h2 className="text-2xl font-black text-gray-800 mb-2">Chinnu is getting ready…</h2>
-        <p className="text-gray-500 font-medium">Connecting you to your learning buddy!</p>
+        <h2 className="mb-2 text-2xl font-black text-gray-800">Chinnu is getting ready…</h2>
+        <p className="font-medium text-gray-500">Connecting you to your learning buddy!</p>
       </div>
       <div className="flex gap-2">
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="w-2.5 h-2.5 rounded-full bg-orange-400"
+            className="h-2.5 w-2.5 rounded-full bg-orange-400"
             style={{ animation: `bounce 1s ease-in-out ${i * 0.2}s infinite` }}
           />
         ))}
@@ -65,14 +69,14 @@ function CallEndedScreen({ onRestart }: { onRestart: () => void }) {
         background: 'linear-gradient(150deg, #fff7ed 0%, #fef3c7 40%, #ede9fe 100%)',
       }}
     >
-      <span className="text-8xl animate-bounce-gentle">🎉</span>
+      <span className="animate-bounce-gentle text-8xl">🎉</span>
       <div>
-        <h2 className="text-3xl font-black text-gray-800 mb-3">Great job today!</h2>
-        <p className="text-gray-600 font-semibold text-lg max-w-sm">
+        <h2 className="mb-3 text-3xl font-black text-gray-800">Great job today!</h2>
+        <p className="max-w-sm text-lg font-semibold text-gray-600">
           Chinnu had so much fun learning with you. Come back soon! 👋
         </p>
       </div>
-      <div className="flex flex-col sm:flex-row gap-4 items-center mt-2">
+      <div className="mt-2 flex flex-col items-center gap-4 sm:flex-row">
         <button
           id="restart-call-btn"
           onClick={onRestart}
@@ -86,7 +90,7 @@ function CallEndedScreen({ onRestart }: { onRestart: () => void }) {
           Talk to Chinnu Again!
         </button>
       </div>
-      <p className="text-xs text-gray-400 font-medium">
+      <p className="text-xs font-medium text-gray-400">
         Powered by Murf Falcon TTS · #VoiceForBharat
       </p>
     </div>
@@ -104,26 +108,25 @@ function MicPermissionError({ onRetry }: { onRetry: () => void }) {
     >
       <span className="text-7xl">🎤</span>
       <div className="max-w-sm">
-        <h2 className="text-2xl font-black text-gray-800 mb-3">
-          Microphone Access Needed
-        </h2>
-        <p className="text-gray-600 font-semibold text-base leading-relaxed mb-4">
-          Chinnu needs to hear your child speak! Please allow microphone access so the
-          learning can begin. 🐥
+        <h2 className="mb-3 text-2xl font-black text-gray-800">Microphone Access Needed</h2>
+        <p className="mb-4 text-base leading-relaxed font-semibold text-gray-600">
+          Chinnu needs to hear your child speak! Please allow microphone access so the learning can
+          begin. 🐥
         </p>
         {/* Step-by-step instructions */}
         <div
-          className="rounded-2xl p-4 text-left text-sm space-y-2"
+          className="space-y-2 rounded-2xl p-4 text-left text-sm"
           style={{ background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.3)' }}
         >
-          <p className="font-black text-gray-700 mb-2">How to enable your microphone:</p>
-          <p className="text-gray-600 font-medium">
-            🔒 <strong>Chrome/Edge:</strong> Click the lock icon in the address bar → Microphone → Allow
+          <p className="mb-2 font-black text-gray-700">How to enable your microphone:</p>
+          <p className="font-medium text-gray-600">
+            🔒 <strong>Chrome/Edge:</strong> Click the lock icon in the address bar → Microphone →
+            Allow
           </p>
-          <p className="text-gray-600 font-medium">
+          <p className="font-medium text-gray-600">
             🦊 <strong>Firefox:</strong> Click the microphone icon in the address bar → Allow
           </p>
-          <p className="text-gray-600 font-medium">
+          <p className="font-medium text-gray-600">
             🍎 <strong>Safari:</strong> Settings → Websites → Microphone → Allow
           </p>
         </div>
@@ -175,7 +178,7 @@ function AgentStateBanner({ agentState }: { agentState: string | undefined }) {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
         transition={{ duration: 0.3 }}
-        className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full px-5 py-2 text-sm font-bold text-white shadow-lg"
+        className="fixed top-20 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full px-5 py-2 text-sm font-bold text-white shadow-lg"
         style={{ background: config.color }}
       >
         <span className="text-base">{config.emoji}</span>
@@ -190,27 +193,51 @@ interface ViewControllerProps {
   appConfig: AppConfig;
 }
 
-type AppView = 'welcome' | 'connecting' | 'session' | 'ended';
+// 'auth' is the gate before welcome — requires login/signup
+type AppView = 'auth' | 'welcome' | 'connecting' | 'session' | 'ended';
 
 export function ViewController({ appConfig }: ViewControllerProps) {
   const { isConnected, start, end } = useSessionContext();
   const { state: agentState } = useAgent();
-  const [view, setView] = useState<AppView>('welcome');
+  const [view, setView] = useState<AppView>('auth');
   const [micError, setMicError] = useState(false);
+  const [authedChild, setAuthedChild] = useState<AuthedChild | null>(null);
 
-  // Sync connection state → view
+  // ── Check existing session on mount ────────────────────────────────────
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.authenticated) {
+          setAuthedChild({ child_id: data.child_id, name: data.name });
+          setView('welcome');
+        }
+      })
+      .catch(() => {
+        // No valid session — stay on 'auth'
+      });
+  }, []);
+
+  // ── Sync connection state → view ────────────────────────────────────────
   useEffect(() => {
     if (isConnected) {
       setView('session');
       setMicError(false);
+    } else if (view === 'session') {
+      setView('ended');
     }
-  }, [isConnected]);
+  }, [isConnected, view]);
+
+  // ── Handlers ────────────────────────────────────────────────────────────
+  const handleAuthenticated = (child: AuthedChild) => {
+    setAuthedChild(child);
+    setView('welcome');
+  };
 
   const handleStartCall = async () => {
     setView('connecting');
     setMicError(false);
     try {
-      // Check microphone permissions first
       await navigator.mediaDevices.getUserMedia({ audio: true });
       await start();
     } catch (err: unknown) {
@@ -223,7 +250,6 @@ export function ViewController({ appConfig }: ViewControllerProps) {
         setMicError(true);
         setView('welcome');
       } else {
-        // Other errors — still attempt connection
         try {
           await start();
         } catch {
@@ -248,17 +274,32 @@ export function ViewController({ appConfig }: ViewControllerProps) {
     handleStartCall();
   };
 
-  // Mic permission error screen (shown over any state)
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth', { method: 'DELETE' });
+    } catch {
+      // ignore
+    }
+    setAuthedChild(null);
+    setView('auth');
+  };
+
+  // ── Mic error screen ─────────────────────────────────────────────────────
   if (micError) {
     return <MicPermissionError onRetry={handleRetryMic} />;
   }
 
-  // Connecting overlay
+  // ── Auth gate ─────────────────────────────────────────────────────────────
+  if (view === 'auth') {
+    return <LoginView onAuthenticated={handleAuthenticated} />;
+  }
+
+  // ── Connecting overlay ────────────────────────────────────────────────────
   if (view === 'connecting' && !isConnected) {
     return <ConnectingOverlay />;
   }
 
-  // Call ended screen
+  // ── Call ended screen ─────────────────────────────────────────────────────
   if (view === 'ended') {
     return <CallEndedScreen onRestart={handleRestart} />;
   }
@@ -271,17 +312,15 @@ export function ViewController({ appConfig }: ViewControllerProps) {
           key="welcome"
           {...VIEW_MOTION_PROPS}
           startButtonText={appConfig.startButtonText}
+          childName={authedChild?.name}
           onStartCall={handleStartCall}
+          onLogout={handleLogout}
         />
       )}
 
       {/* ── Active Session ── */}
       {view === 'session' && isConnected && (
-        <motion.div
-          key="session"
-          className="fixed inset-0 z-10"
-          {...VIEW_MOTION_PROPS}
-        >
+        <motion.div key="session" className="fixed inset-0 z-10" {...VIEW_MOTION_PROPS}>
           {/* Agent state banner: Listening / Speaking / Thinking */}
           <AgentStateBanner agentState={agentState} />
 
@@ -306,7 +345,7 @@ export function ViewController({ appConfig }: ViewControllerProps) {
           />
 
           {/* End call button overlay */}
-          <div className="fixed bottom-32 right-6 z-50">
+          <div className="fixed right-6 bottom-32 z-50">
             <button
               id="end-call-btn"
               onClick={handleEndCall}

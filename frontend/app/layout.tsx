@@ -54,16 +54,15 @@ export default async function RootLayout({ children }: RootLayoutProps) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn(
-        nunito.variable,
-        commitMono.variable,
-        'scroll-smooth font-sans antialiased'
-      )}
+      className={cn(nunito.variable, commitMono.variable, 'scroll-smooth font-sans antialiased')}
     >
       <head>
         {styles && <style>{styles}</style>}
         <title>BoloBuddy — Learn Words with Chinnu!</title>
-        <meta name="description" content="BoloBuddy helps children aged 2–6 learn language naturally through fun voice conversations with Chinnu, their AI companion. Powered by Murf Falcon TTS." />
+        <meta
+          name="description"
+          content="BoloBuddy helps children aged 2–6 learn language naturally through fun voice conversations with Chinnu, their AI companion. Powered by Murf Falcon TTS."
+        />
       </head>
       <body className="overflow-x-hidden">
         <ThemeProvider
@@ -73,23 +72,20 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           disableTransitionOnChange
         >
           {/* BoloBuddy Header */}
-          <header className="fixed top-0 left-0 z-50 w-full flex-row items-center justify-between px-6 py-4 hidden md:flex">
+          <header className="fixed top-0 left-0 z-50 hidden w-full flex-row items-center justify-between px-6 py-4 md:flex">
             <div className="flex items-center gap-2">
               <span className="text-2xl">🐥</span>
-              <span
-                className="text-xl font-black tracking-tight"
-                style={{ color: '#F97316' }}
-              >
+              <span className="text-xl font-black tracking-tight" style={{ color: '#F97316' }}>
                 BoloBuddy
               </span>
             </div>
-            <span className="text-xs font-semibold text-gray-400 tracking-wide">
+            <span className="text-xs font-semibold tracking-wide text-gray-400">
               Powered by{' '}
               <a
                 target="_blank"
                 rel="noopener noreferrer"
                 href="https://murf.ai"
-                className="underline underline-offset-4 hover:text-orange-400 transition-colors"
+                className="underline underline-offset-4 transition-colors hover:text-orange-400"
               >
                 Murf Falcon TTS
               </a>

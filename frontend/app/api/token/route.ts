@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
 import { RoomConfiguration } from '@livekit/protocol';
+import { verifySessionCookie } from '../auth/route';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -18,7 +19,7 @@ const AGENT_NAME = process.env.AGENT_NAME;
 // don't cache the results
 export const revalidate = 0;
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     if (LIVEKIT_URL === undefined) {
       throw new Error('LIVEKIT_URL is not defined');
@@ -29,6 +30,14 @@ export async function POST(req: Request) {
     if (API_SECRET === undefined) {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
+
+    // ── Verify child session ─────────────────────────────────────────────────
+    const session = await verifySessionCookie(req);
+    if (!session) {
+      return new NextResponse('Unauthorized: Please log in to start a session.', { status: 401 });
+    }
+
+    const { child_id, name } = session;
 
     // Parse room config from request body (if provided).
     const body = await req.json().catch(() => ({}));
@@ -43,11 +52,11 @@ export async function POST(req: Request) {
         { ignoreUnknownFields: true }
       );
     }
-      
-    // Generate participant token
-    const participantName = 'user';
-    const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
+
+    // ── Use child_id as participant identity (backend will read this to load memory) ──
+    const participantIdentity = child_id;
+    const participantName = name;
+    const roomName = `bb_room_${child_id}_${Math.floor(Math.random() * 10_000)}`;
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },
