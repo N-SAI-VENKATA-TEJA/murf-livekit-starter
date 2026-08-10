@@ -1,4 +1,5 @@
 import json
+import aiohttp
 import logging
 import os
 from datetime import UTC, datetime
@@ -201,6 +202,32 @@ Child:
 Reply:
 "Great! 🍎 This is an apple."
 
+# DICTIONARY TOOL — MANDATORY SEQUENCE
+
+You MUST follow this EXACT sequence every time you introduce a new word to teach:
+
+STEP 1. Decide the word to teach.
+STEP 2. Call get_word_definition(word) and WAIT for the result.
+STEP 3. Read the "definition" field from the JSON result.
+STEP 4. Your VERY FIRST spoken sentence about that word MUST include a simple explanation
+        derived from that definition. Do NOT skip or delay this. Do NOT say anything before
+        you have incorporated the definition.
+STEP 5. Then ask the child to say the word.
+
+EXAMPLE (correct behaviour):
+  - Tool returns: {{"word": "cat", "definition": "A small furry animal kept as a pet.", "example": ""}}
+  - You say: "A cat is a small, soft animal that lives in our homes! Can you say cat?"
+
+EXAMPLE (incorrect — do NOT do this):
+  - Tool returns: {{"word": "cat", "definition": "..."}}
+  - You say: "Look at this! Can you say cat?" ← WRONG. You ignored the definition.
+
+Additional rules:
+- Call this tool ONLY when introducing a new word, NOT for every conversational reply.
+- Simplify the definition into words a 2-6 year old can understand.
+- NEVER read the raw dictionary text verbatim — always rephrase it for a young child.
+- If the tool returns {{"error": "..."}}, say: "I couldn't find that word right now. Let's try another one!" and pick a different word.
+
 # MEMORY — SAVING WITH CONSENT
 
 When the child successfully learns a new word, OR after you have practiced a word 3 times, you MUST ask for consent before saving. Follow this exact sequence:
@@ -294,6 +321,77 @@ class Assistant(Agent):
             self.consent_state = "DENIED"
             logger.info(f"[memory] State -> DENIED for child_id={self._child_id}")
             return '{"success": true, "message": "Consent DENIED. Do not call update_child_memory."}'
+
+    @function_tool
+    async def get_word_definition(self, context: RunContext, word: str) -> str:
+        """Fetch a real dictionary definition for a word from the Free Dictionary API.
+
+        Call this tool when you have chosen a word to teach the child and need its
+        real definition, pronunciation, and an example sentence.
+        Do NOT call this for every message — only when introducing a new word.
+
+        Args:
+            word: The English word to look up (e.g. "apple", "elephant").
+
+        Returns:
+            A JSON string with keys: word, definition, example, phonetic.
+            On failure, returns a JSON string with key "error".
+        """
+        word_clean = word.strip().lower()
+        url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word_clean}"
+        logger.info(f"[dictionary] Fetching definition for word={word_clean!r} url={url}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 404:
+                        logger.warning(f"[dictionary] Word not found: {word_clean!r}")
+                        return json.dumps({"error": f"Word '{word_clean}' was not found in the dictionary."})
+                    if resp.status != 200:
+                        logger.warning(f"[dictionary] API returned status {resp.status} for word={word_clean!r}")
+                        return json.dumps({"error": f"Dictionary API returned status {resp.status}."})
+
+                    data = await resp.json()
+
+        except TimeoutError:
+            logger.warning(f"[dictionary] Timeout fetching definition for word={word_clean!r}")
+            return json.dumps({"error": "Dictionary API timed out."})
+        except Exception as exc:
+            logger.warning(f"[dictionary] Error fetching definition for word={word_clean!r}: {exc}")
+            return json.dumps({"error": "Could not reach the Dictionary API."})
+
+        # Safely extract the most useful fields from the API response
+        try:
+            entry = data[0]
+            phonetic = entry.get("phonetic", "")
+
+            # Walk meanings until we find a definition
+            definition = ""
+            example = ""
+            for meaning in entry.get("meanings", []):
+                for defn in meaning.get("definitions", []):
+                    if defn.get("definition"):
+                        definition = defn["definition"]
+                        example = defn.get("example", "")
+                        break
+                if definition:
+                    break
+
+            if not definition:
+                logger.warning(f"[dictionary] No definition text found for word={word_clean!r}")
+                return json.dumps({"error": "No definition available for this word."})
+
+            result = {
+                "word": word_clean,
+                "phonetic": phonetic,
+                "definition": definition,
+                "example": example,
+            }
+            logger.info(f"[dictionary] Successfully extracted: {result}")
+            return json.dumps(result)
+
+        except (KeyError, IndexError, TypeError) as exc:
+            logger.warning(f"[dictionary] Unexpected API response structure for word={word_clean!r}: {exc}")
+            return json.dumps({"error": "Unexpected data from Dictionary API."})
 
     @function_tool
     async def update_child_memory(
