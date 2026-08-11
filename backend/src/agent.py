@@ -25,6 +25,16 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 logger = logging.getLogger("agent")
 
+# Setup root logger to dump to file for debugging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("agent_debug.log", mode="w", encoding="utf-8")
+    ]
+)
+
 load_dotenv(".env.local")
 
 # ---------------------------------------------------------------------------
@@ -471,6 +481,24 @@ def prewarm(proc: JobProcess):
 server.setup_fnc = prewarm
 
 
+def _parse_outbound_metadata(ctx: JobContext) -> dict:
+    """Return parsed metadata dict if this is an outbound phone call, else {}."""
+    # Try both ctx.job.metadata (from dispatch) and ctx.room.metadata
+    for raw in (
+        getattr(ctx.job, "metadata", None),
+        getattr(ctx.room, "metadata", None),
+    ):
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+            if data.get("outbound"):
+                return data
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            continue
+    return {}
+
+
 @server.rtc_session(agent_name="my-agent")
 async def my_agent(ctx: JobContext):
     # Logging setup
@@ -487,35 +515,58 @@ async def my_agent(ctx: JobContext):
     # The agent job starts slightly before the child's browser finishes joining.
     # We use an asyncio.Event so we wake up immediately when they arrive,
     # rather than sleeping a fixed amount and potentially missing them.
-    child_id: str = ""
+    outbound_meta = _parse_outbound_metadata(ctx)
+    is_outbound = bool(outbound_meta)
+
+    if is_outbound:
+        child_id = outbound_meta.get("child_id", "")
+    else:
+        child_id = ""
+
     participant_ready = asyncio.Event()
 
     # Check if participant is already in the room
     for _, participant in ctx.room.remote_participants.items():
-        child_id = participant.identity
-        logger.info(f"[session] Child already in room with identity={child_id!r}")
-        participant_ready.set()
-        break
+        if is_outbound:
+            if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                logger.info("[session] SIP participant already in room!")
+                participant_ready.set()
+                break
+        else:
+            child_id = participant.identity
+            logger.info(f"[session] Child already in room with identity={child_id!r}")
+            participant_ready.set()
+            break
 
     if not child_id:
         # Register listener BEFORE awaiting so we don't miss the event
         @ctx.room.on("participant_connected")
         def _on_participant(participant: rtc.RemoteParticipant):
             nonlocal child_id
-            if not child_id:
-                child_id = participant.identity
-                logger.info(f"[session] Child joined with identity={child_id!r}")
-                participant_ready.set()
+            if is_outbound:
+                if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                    logger.info("[session] SIP participant joined")
+                    participant_ready.set()
+            else:
+                if not child_id:
+                    child_id = participant.identity
+                    logger.info(f"[session] Child joined with identity={child_id!r}")
+                    participant_ready.set()
 
         # Wait up to 5 seconds for the child to appear
         try:
+            # 5s is enough because call_trigger.py dispatches AFTER SIP answers,
+            # so the participant should already be here.
             await asyncio.wait_for(participant_ready.wait(), timeout=5.0)
         except asyncio.TimeoutError:
             # Final scan in case the event fired but child_id wasn't captured
             for _, participant in ctx.room.remote_participants.items():
-                child_id = participant.identity
-                logger.info(f"[session] Child found after timeout scan: identity={child_id!r}")
-                break
+                if is_outbound and participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                    break
+                elif not is_outbound:
+                    child_id = participant.identity
+                    logger.info(f"[session] Child found after timeout scan: identity={child_id!r}")
+                    break
 
     if not child_id:
         logger.warning("[session] Could not determine child_id — memory will be empty for this session")
@@ -531,6 +582,21 @@ async def my_agent(ctx: JobContext):
 
     # ── Generate the system prompt and the initial greeting string ────────
     system_prompt, initial_greeting = build_system_prompt(memory)
+
+    # ── Outbound phone call: override greeting with a clear intro ──────────
+    if is_outbound:
+        caller_name = outbound_meta.get("child_name", "") or (memory.get("name", "") if memory else "")
+        name_part = f", {caller_name}" if caller_name else ""
+        initial_greeting = (
+            f"Hi{name_part}! This is Chinnu, your BoloBuddy language practice buddy. "
+            "I'm calling for your daily language practice session. "
+            "If you'd like me to stop, just say stop. "
+            "Ready to learn a fun new word today?"
+        )
+        logger.info(
+            f"[session] Outbound call detected — phone greeting set, "
+            f"phone_number={outbound_meta.get('phone_number')!r}"
+        )
 
     # ── Set up voice pipeline — Deepgram STT → Gemini LLM → Murf TTS ──────
     session = AgentSession(
@@ -555,26 +621,40 @@ async def my_agent(ctx: JobContext):
         preemptive_generation=False,
     )
 
-    # ── Start session with the Assistant (memory already baked into prompt) ─
-    await session.start(
-        agent=Assistant(child_id=child_id, prompt=system_prompt),
-        room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: (
-                    noise_cancellation.BVCTelephony()
-                    if params.participant.kind
-                    == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-                    else noise_cancellation.BVC()
+    if is_outbound:
+        # NOTE: Noise cancellation is disabled for SIP/phone calls on Windows
+        # because BVCTelephony() causes a livekit_ffi audio_stream crash.
+        await session.start(
+            agent=Assistant(child_id=child_id, prompt=system_prompt),
+            room=ctx.room,
+            room_options=room_io.RoomOptions(
+                audio_input=room_io.AudioInputOptions(
+                    noise_cancellation=None,
                 ),
             ),
-        ),
-    )
+        )
+    else:
+        # Web sessions use BVC noise cancellation
+        await session.start(
+            agent=Assistant(child_id=child_id, prompt=system_prompt),
+            room=ctx.room,
+            room_options=room_io.RoomOptions(
+                audio_input=room_io.AudioInputOptions(
+                    noise_cancellation=noise_cancellation.BVC(),
+                ),
+            ),
+        )
 
     # ── Make the agent greet the child immediately ────────
     # We use session.say() to synthesize and play the greeting string deterministically,
     # adding it to the LLM's chat context so it remembers what it said.
-    session.say(initial_greeting, add_to_chat_ctx=True)
+    # For outbound calls, we use allow_interruptions=False so the agent doesn't
+    # hear its own echo from the phone network and interrupt itself.
+    logger.info(f"[session] Saying greeting: {initial_greeting!r}")
+    if is_outbound:
+        session.say(initial_greeting, add_to_chat_ctx=True, allow_interruptions=False)
+    else:
+        session.say(initial_greeting, add_to_chat_ctx=True)
 
 
 if __name__ == "__main__":
