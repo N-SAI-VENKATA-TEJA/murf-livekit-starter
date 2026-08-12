@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useSessionContext, useAgent } from '@livekit/components-react';
 import type { AppConfig } from '@/app-config';
@@ -8,6 +8,7 @@ import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session
 import type { AuthedChild } from '@/components/app/login-view';
 import { LoginView } from '@/components/app/login-view';
 import { WelcomeView } from '@/components/app/welcome-view';
+import type { Escalation } from '@/components/app/welcome-view';
 
 const MotionWelcomeView = motion.create(WelcomeView);
 const MotionSessionView = motion.create(AgentSessionView_01);
@@ -196,12 +197,63 @@ interface ViewControllerProps {
 // 'auth' is the gate before welcome — requires login/signup
 type AppView = 'auth' | 'welcome' | 'connecting' | 'session' | 'ended';
 
+// ── Escalation polling hook ───────────────────────────────────────────────────
+// Polls GET /api/escalations every 30 seconds while the parent is on the
+// welcome view. child_id is NOT supplied by the browser; it comes from the
+// signed JWT session cookie that the API verifies server-side.
+function useEscalations(active: boolean): Escalation[] {
+  const [escalations, setEscalations] = useState<Escalation[]>([]);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchEscalations = useCallback(async () => {
+    try {
+      const res = await fetch('/api/escalations');
+      if (res.ok) {
+        const data = await res.json();
+        setEscalations(data.escalations ?? []);
+      }
+    } catch {
+      // Network error — keep showing last known state
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active) {
+      // Stop polling when not on welcome view
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
+    // Fetch immediately on activation
+    fetchEscalations();
+
+    // Then poll every 30 seconds
+    intervalRef.current = setInterval(fetchEscalations, 30_000);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [active, fetchEscalations]);
+
+  return escalations;
+}
+
+
 export function ViewController({ appConfig }: ViewControllerProps) {
   const { isConnected, start, end } = useSessionContext();
   const { state: agentState } = useAgent();
   const [view, setView] = useState<AppView>('auth');
   const [micError, setMicError] = useState(false);
   const [authedChild, setAuthedChild] = useState<AuthedChild | null>(null);
+
+  // Poll escalations only while the parent dashboard (welcome view) is visible
+  const escalations = useEscalations(view === 'welcome' && !isConnected);
 
   // ── Check existing session on mount ────────────────────────────────────
   useEffect(() => {
@@ -315,6 +367,7 @@ export function ViewController({ appConfig }: ViewControllerProps) {
           childName={authedChild?.name}
           onStartCall={handleStartCall}
           onLogout={handleLogout}
+          escalations={escalations}
         />
       )}
 

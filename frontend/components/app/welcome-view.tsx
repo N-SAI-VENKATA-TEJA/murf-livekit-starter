@@ -1,6 +1,19 @@
 'use client';
 
-/* ── Floating bubble decorations ──────────────────────────── */
+import { useRef } from 'react';
+
+/* ── Types ─────────────────────────────────────────────────────────────── */
+export type Escalation = {
+  reference_id: string;
+  reason: string;
+  what_happened: string;
+  what_checked: string;
+  language: string;
+  follow_up_method: string;
+  status: string;
+  created_at: string;
+};
+
 function Bubble({
   size,
   color,
@@ -208,12 +221,173 @@ function PulsingButton({ onClick, label }: { onClick: () => void; label: string 
   );
 }
 
+/* ── Escalation Alert Banner ──────────────────────────────── */
+function EscalationAlert({
+  escalations,
+  onViewDetails,
+}: {
+  escalations: Escalation[];
+  onViewDetails: () => void;
+}) {
+  const open = escalations.filter((e) => e.status === 'open');
+  if (open.length === 0) return null;
+
+  const count = open.length;
+  const latest = open[0];
+
+  return (
+    <div
+      className="relative z-50 mx-4 mt-4 rounded-2xl border-2 p-4 shadow-xl"
+      style={{
+        background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+        borderColor: '#F97316',
+      }}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 text-2xl">⚠️</span>
+          <div>
+            <p className="text-base font-black text-gray-900">
+              {count === 1 ? 'Human Help Request' : `${count} Human Help Requests`}
+            </p>
+            <p className="text-sm font-semibold text-gray-600">
+              Your child has a request that may need your attention.
+            </p>
+            {count === 1 && (
+              <p className="mt-0.5 text-sm font-bold" style={{ color: '#EA580C' }}>
+                Reference: {latest.reference_id}
+              </p>
+            )}
+          </div>
+        </div>
+        <button
+          id="view-escalation-btn"
+          onClick={onViewDetails}
+          className="shrink-0 rounded-full px-5 py-2.5 text-sm font-black text-white shadow-md transition-all hover:scale-105 active:scale-95"
+          style={{ background: 'linear-gradient(135deg, #F97316, #EA580C)' }}
+        >
+          View {count === 1 ? 'Request' : 'Requests'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Escalation Detail Card ────────────────────────────────── */
+function EscalationCard({ esc }: { esc: Escalation }) {
+  const reasonLabel =
+    esc.reason === 'teacher_help'
+      ? '🧑‍🏫 Teacher Help Requested'
+      : '😔 Child Became Upset';
+
+  const followUpLabel =
+    esc.follow_up_method === 'parent_teacher' ? 'Parent / Teacher' : esc.follow_up_method;
+
+  const dateStr = esc.created_at
+    ? new Date(esc.created_at).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '';
+
+  return (
+    <div
+      className="rounded-2xl border p-5 shadow-md"
+      style={{
+        background: 'white',
+        borderColor: esc.status === 'open' ? '#fed7aa' : '#e5e7eb',
+      }}
+    >
+      {/* Header row */}
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <span
+            className="font-mono text-lg font-black"
+            style={{ color: '#EA580C' }}
+          >
+            {esc.reference_id}
+          </span>
+          <p className="mt-1 text-sm font-bold text-gray-700">{reasonLabel}</p>
+        </div>
+        <span
+          className="shrink-0 rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide"
+          style={
+            esc.status === 'open'
+              ? { background: '#fef3c7', color: '#d97706' }
+              : { background: '#f3f4f6', color: '#6b7280' }
+          }
+        >
+          {esc.status === 'open' ? '🟠 OPEN' : esc.status.toUpperCase()}
+        </span>
+      </div>
+
+      {/* Details */}
+      <div className="space-y-3 text-sm">
+        <div>
+          <p className="font-black text-gray-700">What happened:</p>
+          <p className="mt-0.5 font-medium text-gray-600">{esc.what_happened}</p>
+        </div>
+        <div>
+          <p className="font-black text-gray-700">What Chinnu checked:</p>
+          <p className="mt-0.5 font-medium text-gray-600">{esc.what_checked}</p>
+        </div>
+        <div className="flex flex-wrap gap-4">
+          <div>
+            <span className="font-black text-gray-700">Language: </span>
+            <span className="font-medium text-gray-600">{esc.language}</span>
+          </div>
+          <div>
+            <span className="font-black text-gray-700">Follow-up: </span>
+            <span className="font-medium text-gray-600">{followUpLabel}</span>
+          </div>
+        </div>
+        {dateStr && (
+          <p className="text-xs font-medium text-gray-400">Created: {dateStr}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Escalation Panel Section ──────────────────────────────── */
+function EscalationPanel({ escalations, panelRef }: { escalations: Escalation[]; panelRef: React.RefObject<HTMLDivElement | null> }) {
+  if (escalations.length === 0) return null;
+  const open = escalations.filter((e) => e.status === 'open');
+  if (open.length === 0) return null;
+
+  return (
+    <section
+      ref={panelRef}
+      className="w-full px-4 py-12"
+      style={{ background: 'linear-gradient(180deg, #fff7ed 0%, #fffbf5 100%)' }}
+    >
+      <div className="mx-auto max-w-2xl">
+        <div className="mb-6">
+          <h2 className="text-2xl font-black text-gray-800">Human Help Requests</h2>
+          <p className="mt-1 text-sm font-medium text-gray-500">
+            Chinnu flagged these sessions for your attention.
+          </p>
+        </div>
+        <div className="flex flex-col gap-4">
+          {open.map((esc) => (
+            <EscalationCard key={esc.reference_id} esc={esc} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ── Main Welcome View ─────────────────────────────────────── */
 interface WelcomeViewProps {
   startButtonText: string;
   onStartCall: () => void;
   childName?: string;
   onLogout?: () => void;
+  escalations?: Escalation[];
 }
 
 export const WelcomeView = ({
@@ -221,10 +395,19 @@ export const WelcomeView = ({
   onStartCall,
   childName,
   onLogout,
+  escalations = [],
   ref,
 }: React.ComponentProps<'div'> & WelcomeViewProps) => {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const scrollToPanel = () => {
+    panelRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   return (
     <div ref={ref} className="min-h-screen w-full overflow-x-hidden overflow-y-auto">
+      {/* ── ESCALATION ALERT (top, above hero) ─────────────────── */}
+      <EscalationAlert escalations={escalations} onViewDetails={scrollToPanel} />
       {/* ── HERO SECTION ──────────────────────────────────────── */}
       <section
         className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden px-4 pt-20 pb-16"
@@ -324,6 +507,9 @@ export const WelcomeView = ({
           </p>
         </div>
       </section>
+
+      {/* ── ESCALATION DETAIL PANEL ──────────────────────────────── */}
+      <EscalationPanel escalations={escalations} panelRef={panelRef} />
 
       {/* ── HOW IT WORKS SECTION ─────────────────────────────── */}
       <section className="w-full px-4 py-20" style={{ background: 'white' }}>

@@ -1,4 +1,6 @@
 import json
+import random
+import string
 import aiohttp
 import logging
 import os
@@ -42,12 +44,36 @@ load_dotenv(".env.local")
 # ---------------------------------------------------------------------------
 _mongo_client = None
 
+def _reset_mongo_client():
+    """Reset the global MongoDB client — must be called at the start of each job
+    so that a fresh client is created in the current subprocess's event loop.
+    motor.motor_asyncio.AsyncIOMotorClient is bound to the event loop it was
+    created in; reusing it across jobs (which run in separate subprocesses with
+    separate loops) causes 'Future attached to a different loop' errors.
+    """
+    global _mongo_client
+    if _mongo_client is not None:
+        try:
+            _mongo_client.close()
+        except Exception:
+            pass
+    _mongo_client = None
+
+
 def get_children_col():
     global _mongo_client
     if _mongo_client is None:
         # Initialize lazily inside the active event loop
         _mongo_client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URI"])
     return _mongo_client["bolobuddy"]["children"]
+
+
+def get_escalations_col():
+    """Return the bolobuddy.escalations collection, reusing the shared client."""
+    global _mongo_client
+    if _mongo_client is None:
+        _mongo_client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URI"])
+    return _mongo_client["bolobuddy"]["escalations"]
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +312,51 @@ If the child is silent:
 2. "Would you like to try together?"
 3. "No worries! We can play again later. Bye!"
 
+# HUMAN HELP
+
+Chinnu should not try to solve every problem itself.
+
+Offer human/teacher help when:
+
+1. The child is clearly upset, frustrated, overwhelmed, or repeatedly wants to stop.
+   Examples: "I'm frustrated.", "I don't want to do this anymore.", "This is too hard.", "I can't do this."
+
+2. The child explicitly asks for a teacher or human.
+   Examples: "I want to talk to my teacher.", "Can my teacher help me?", "I need help from my teacher."
+
+A child giving a WRONG ANSWER is NOT a reason for escalation. Gently correct and continue.
+Do NOT escalate unnecessarily.
+
+MANDATORY SEQUENCE before creating an escalation:
+
+1. Call request_escalation_consent() FIRST.
+2. Explain warmly why human help may be useful.
+3. Explain the short information that will be shared (just a brief summary — NOT the full conversation).
+4. Ask for permission: "Is that okay?"
+5. Listen to the child's response.
+6. Call record_escalation_consent_decision(granted=True) if they clearly say yes (e.g. "yes", "okay", "sure").
+   Call record_escalation_consent_decision(granted=False) if they say no, are silent, or are unsure.
+7. ONLY if granted=True, call create_escalation().
+
+If permission is denied:
+- Do NOT create an escalation.
+- Do NOT insert anything into the database.
+- Continue the session naturally.
+- The escalation consent state resets automatically.
+
+After create_escalation() succeeds:
+- Do NOT read the reference ID aloud to the child.
+- Say something warm and simple, such as:
+  "Okay! I've sent a note to your parent so they can help you."
+  or: "I've let your parent know that you need some help. They can see what happened."
+
+If the database insertion fails:
+- Do NOT tell the child the escalation was successful.
+- Say: "I'm sorry, I couldn't send that right now. Let's keep going together!"
+
+Never include passwords, OTPs, PINs, account numbers, tokens,
+or the full conversation transcript in any escalation fields.
+
 Always remain Chinnu from BoloBuddy.
 """
     return prompt, greeting
@@ -294,11 +365,22 @@ Always remain Chinnu from BoloBuddy.
 # ---------------------------------------------------------------------------
 # Assistant — agent class with memory tools
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Reference ID generator for escalations
+# ---------------------------------------------------------------------------
+def _generate_reference_id() -> str:
+    """Generate a unique human-readable reference ID like BB-A81K2P."""
+    chars = string.ascii_uppercase + string.digits
+    suffix = "".join(random.choices(chars, k=6))
+    return f"BB-{suffix}"
+
+
 class Assistant(Agent):
     def __init__(self, child_id: str, prompt: str) -> None:
         super().__init__(instructions=prompt)
         self._child_id = child_id
-        self.consent_state = "NO_CONSENT"
+        self.consent_state = "NO_CONSENT"          # memory consent state
+        self.escalation_consent_state = "NO_CONSENT"  # escalation consent state (separate)
 
     @function_tool
     async def request_memory_save_consent(self, context: RunContext) -> str:
@@ -467,6 +549,154 @@ class Assistant(Agent):
         self.consent_state = "NO_CONSENT"
         return '{"success": true}'
 
+    # ── Escalation Consent Tools ─────────────────────────────────────────────
+
+    @function_tool
+    async def request_escalation_consent(self, context: RunContext) -> str:
+        """Call this tool BEFORE asking the child for permission to send a human-help request.
+        This puts the escalation consent into a PENDING state so you can record their answer.
+        Only call this when the child is upset or explicitly asks for a teacher/human.
+        """
+        if self.escalation_consent_state != "NO_CONSENT":
+            return (
+                f'{{"error": "Cannot request escalation consent from state '
+                f'{self.escalation_consent_state}. State must be NO_CONSENT."}}'
+            )
+        self.escalation_consent_state = "PENDING"
+        logger.info(f"[escalation] Consent state -> PENDING for child_id={self._child_id}")
+        return (
+            '{"success": true, "message": "Escalation consent is now PENDING. '
+            'Explain what will be shared and ask the child for permission."}'
+        )
+
+    @function_tool
+    async def record_escalation_consent_decision(self, context: RunContext, granted: bool) -> str:
+        """Record the child's answer after you have asked for escalation permission.
+        You MUST call request_escalation_consent() first.
+
+        Args:
+            granted: True if the child clearly said yes. False if they said no, were silent, or were unsure.
+        """
+        if self.escalation_consent_state != "PENDING":
+            return (
+                f'{{"error": "Cannot record escalation decision. State is '
+                f'{self.escalation_consent_state}, but must be PENDING."}}'
+            )
+        if granted:
+            self.escalation_consent_state = "GRANTED"
+            logger.info(f"[escalation] Consent state -> GRANTED for child_id={self._child_id}")
+            return '{"success": true, "message": "Escalation consent GRANTED. You may now call create_escalation."}'
+        else:
+            # DENIED → immediately reset to NO_CONSENT so another escalation can happen later
+            self.escalation_consent_state = "NO_CONSENT"
+            logger.info(f"[escalation] Consent state -> DENIED (reset to NO_CONSENT) for child_id={self._child_id}")
+            return (
+                '{"success": true, "message": "Escalation consent DENIED. '
+                'Do not create an escalation. Continue naturally."}'
+            )
+
+    @function_tool
+    async def create_escalation(
+        self,
+        context: RunContext,
+        reason: str,
+        what_happened: str,
+        what_checked: str,
+        language: str,
+        follow_up_method: str,
+    ) -> str:
+        """Create a human-help escalation request and store it in MongoDB.
+
+        IMPORTANT: You MUST have escalation consent GRANTED before calling this tool.
+        Call request_escalation_consent() and record_escalation_consent_decision(granted=True) first.
+
+        Args:
+            reason: Short reason code — use 'child_upset' or 'teacher_help'.
+            what_happened: A brief, human-readable description of what the child was experiencing
+                           (e.g. 'Child became frustrated during word practice').
+                           Maximum 200 characters. Do NOT include passwords, tokens, or transcripts.
+            what_checked: A brief description of what Chinnu already tried
+                          (e.g. 'Chinnu encouraged the child and attempted to continue gently').
+                          Maximum 200 characters.
+            language: The language the child was using (e.g. 'Telugu', 'English', 'Hindi').
+            follow_up_method: How the parent/teacher should follow up (e.g. 'parent_teacher').
+        """
+        # ── Enforce consent ──────────────────────────────────────────────────
+        if self.escalation_consent_state != "GRANTED":
+            logger.warning(
+                f"[escalation] Blocked — escalation_consent_state={self.escalation_consent_state} "
+                f"for child_id={self._child_id}"
+            )
+            return (
+                f'{{"error": "Permission denied. Escalation consent is '
+                f'{self.escalation_consent_state}, must be GRANTED. '
+                f'Call request_escalation_consent() and get the child\'s permission first."}}'
+            )
+
+        child_id = self._child_id
+        if not child_id:
+            logger.warning("[escalation] No child_id available — cannot create escalation")
+            return '{"error": "No child identity available for this session."}'
+
+        # ── Sanitize inputs ──────────────────────────────────────────────────
+        VALID_REASONS = {"child_upset", "teacher_help"}
+        reason_clean = reason.strip().lower()
+        if reason_clean not in VALID_REASONS:
+            reason_clean = "child_upset"  # safe default
+
+        what_happened_clean = str(what_happened).strip()[:200]
+        what_checked_clean = str(what_checked).strip()[:200]
+        language_clean = str(language).strip()[:50]
+        follow_up_clean = str(follow_up_method).strip()[:50]
+
+        # ── Generate reference ID ────────────────────────────────────────────
+        reference_id = _generate_reference_id()
+
+        logger.info(
+            f"[escalation] Creating escalation for child_id={child_id} "
+            f"reason={reason_clean!r} reference_id={reference_id!r}"
+        )
+
+        # ── Insert into MongoDB ──────────────────────────────────────────────
+        try:
+            col = get_escalations_col()
+            doc = {
+                "reference_id": reference_id,
+                "child_id": child_id,
+                "reason": reason_clean,
+                "what_happened": what_happened_clean,
+                "what_checked": what_checked_clean,
+                "language": language_clean,
+                "follow_up_method": follow_up_clean,
+                "status": "open",
+                "created_at": datetime.now(UTC),
+            }
+            await col.insert_one(doc)
+            logger.info(
+                f"[escalation] Stored in MongoDB: reference_id={reference_id!r} "
+                f"child_id={child_id!r}"
+            )
+        except Exception as exc:
+            logger.error(f"[escalation] MongoDB insertion failed: {exc}")
+            # Reset consent so session isn't stuck
+            self.escalation_consent_state = "NO_CONSENT"
+            return '{"error": "database_error"}'
+
+        # ── Reset consent state ──────────────────────────────────────────────
+        self.escalation_consent_state = "NO_CONSENT"
+
+        # Return reference ID internally (Chinnu must NOT read this to the child)
+        return json.dumps({
+            "success": True,
+            "reference_id": reference_id,
+            "message": (
+                "Escalation created successfully. "
+                f"Reference ID: {reference_id}. "
+                "Do NOT read this reference ID to the child. "
+                "Tell the child warmly that their parent has been notified."
+            ),
+        })
+
 
 # ---------------------------------------------------------------------------
 # AgentServer setup
@@ -507,6 +737,14 @@ async def my_agent(ctx: JobContext):
     }
 
     import asyncio
+
+    # ── Reset MongoDB client for this job's event loop ──────────────────────
+    # Each job runs in its own subprocess with its own asyncio event loop.
+    # Motor's AsyncIOMotorClient is bound to the loop it was created in,
+    # so we must create a fresh client here to avoid "Future attached to a
+    # different loop" RuntimeErrors on the second and subsequent sessions.
+    _reset_mongo_client()
+    logger.info("[session] MongoDB client reset for new job event loop")
 
     # ── Connect to the room first so we can read participant identity ──────
     await ctx.connect()
@@ -553,11 +791,12 @@ async def my_agent(ctx: JobContext):
                     logger.info(f"[session] Child joined with identity={child_id!r}")
                     participant_ready.set()
 
-        # Wait up to 5 seconds for the child to appear
+        # Wait up to 10 seconds for the child to appear
         try:
-            # 5s is enough because call_trigger.py dispatches AFTER SIP answers,
-            # so the participant should already be here.
-            await asyncio.wait_for(participant_ready.wait(), timeout=5.0)
+            # 10s gives the browser enough time to reconnect after a new call
+            # (the previous 5s was too short when the agent starts before the
+            # browser re-establishes its WebRTC connection).
+            await asyncio.wait_for(participant_ready.wait(), timeout=10.0)
         except asyncio.TimeoutError:
             # Final scan in case the event fired but child_id wasn't captured
             for _, participant in ctx.room.remote_participants.items():
