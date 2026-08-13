@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { verifySessionCookie } from '../route';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { verifySessionCookie } from '@/lib/session';
 
-// ── GET /api/auth/me ──────────────────────────────────────────────────────────
+// -- GET /api/auth/me --------------------------------------------------------
 // Used by the frontend on load to check if there is already a valid session.
 export async function GET(req: NextRequest) {
   const session = await verifySessionCookie(req);

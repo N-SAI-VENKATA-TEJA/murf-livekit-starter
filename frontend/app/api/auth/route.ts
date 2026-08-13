@@ -1,15 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { SignJWT, jwtVerify } from 'jose';
+import { SignJWT } from 'jose';
 import { MongoClient } from 'mongodb';
+import { JWT_SECRET, COOKIE_NAME } from '@/lib/session';
 
-// ── Environment ─────────────────────────────────────────────────────────────
+// -- Environment -------------------------------------------------------------
 const MONGODB_URI = process.env.MONGODB_URI!;
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
-const COOKIE_NAME = 'bb_session';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
-// ── MongoDB client (reused across requests in the same process) ─────────────
+// -- MongoDB client (reused across requests in the same process) -------------
 let _mongoClient: MongoClient | null = null;
 async function getMongoClient(): Promise<MongoClient> {
   if (!_mongoClient) {
@@ -24,7 +23,7 @@ async function getCollection() {
   return client.db('bolobuddy').collection('children');
 }
 
-// ── JWT helpers ──────────────────────────────────────────────────────────────
+// -- JWT helpers -------------------------------------------------------------
 async function signSessionToken(child_id: string, name: string): Promise<string> {
   return new SignJWT({ child_id, name })
     .setProtectedHeader({ alg: 'HS256' })
@@ -43,14 +42,14 @@ function setSessionCookie(response: NextResponse, token: string) {
   });
 }
 
-// ── Request body type ────────────────────────────────────────────────────────
+// -- Request body type -------------------------------------------------------
 type AuthBody = {
   action: 'signup' | 'login';
   name: string;
   password: string;
 };
 
-// ── POST /api/auth ────────────────────────────────────────────────────────────
+// -- POST /api/auth ----------------------------------------------------------
 export async function POST(req: NextRequest) {
   if (!MONGODB_URI) return NextResponse.json({ error: 'MONGODB_URI not set' }, { status: 500 });
   if (!process.env.JWT_SECRET)
@@ -74,7 +73,7 @@ export async function POST(req: NextRequest) {
 
   const col = await getCollection();
 
-  // ── SIGNUP ─────────────────────────────────────────────────────────────────
+  // -- SIGNUP ----------------------------------------------------------------
   if (action === 'signup') {
     const existing = await col.findOne({ name: name.trim() });
     if (existing) {
@@ -106,7 +105,7 @@ export async function POST(req: NextRequest) {
     return res;
   }
 
-  // ── LOGIN ──────────────────────────────────────────────────────────────────
+  // -- LOGIN -----------------------------------------------------------------
   const doc = await col.findOne({ name: name.trim() });
   if (!doc) {
     return NextResponse.json({ error: 'No account found with that name.' }, { status: 401 });
@@ -125,24 +124,9 @@ export async function POST(req: NextRequest) {
   return res;
 }
 
-// ── DELETE /api/auth (logout) ─────────────────────────────────────────────────
+// -- DELETE /api/auth (logout) -----------------------------------------------
 export async function DELETE() {
   const res = NextResponse.json({ success: true });
-  res.cookies.set('bb_session', '', { maxAge: 0, path: '/' });
+  res.cookies.set(COOKIE_NAME, '', { maxAge: 0, path: '/' });
   return res;
-}
-
-// ── Utility: exported for use by other routes ─────────────────────────────────
-export { JWT_SECRET, COOKIE_NAME };
-export async function verifySessionCookie(
-  req: NextRequest
-): Promise<{ child_id: string; name: string } | null> {
-  const cookie = req.cookies.get(COOKIE_NAME);
-  if (!cookie?.value) return null;
-  try {
-    const { payload } = await jwtVerify(cookie.value, JWT_SECRET);
-    return { child_id: payload.child_id as string, name: payload.name as string };
-  } catch {
-    return null;
-  }
 }

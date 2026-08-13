@@ -214,6 +214,7 @@ interface WelcomeViewProps {
   onStartCall: () => void;
   childName?: string;
   onLogout?: () => void;
+  onDashboard?: () => void;
 }
 
 export const WelcomeView = ({
@@ -221,6 +222,7 @@ export const WelcomeView = ({
   onStartCall,
   childName,
   onLogout,
+  onDashboard,
   ref,
 }: React.ComponentProps<'div'> & WelcomeViewProps) => {
   return (
@@ -232,15 +234,27 @@ export const WelcomeView = ({
           background: 'linear-gradient(150deg, #fff7ed 0%, #fef3c7 30%, #ede9fe 65%, #f0f9ff 100%)',
         }}
       >
-        {/* Logout Button */}
-        {onLogout && (
-          <button
-            onClick={onLogout}
-            className="absolute top-6 right-6 z-50 rounded-full bg-white/50 px-4 py-2 text-sm font-bold text-gray-700 shadow-sm backdrop-blur-md transition-all hover:bg-white/80 hover:shadow-md active:scale-95"
-          >
-            Log Out 👋
-          </button>
-        )}
+        {/* Top-right action buttons */}
+        <div className="absolute top-6 right-6 z-50 flex items-center gap-2">
+          {onDashboard && (
+            <button
+              id="dashboard-btn"
+              onClick={onDashboard}
+              className="rounded-full bg-white/50 px-4 py-2 text-sm font-bold text-gray-700 shadow-sm backdrop-blur-md transition-all hover:bg-white/80 hover:shadow-md active:scale-95"
+              style={{ border: '1.5px solid rgba(124,58,237,0.25)' }}
+            >
+              📊 Dashboard
+            </button>
+          )}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="rounded-full bg-white/50 px-4 py-2 text-sm font-bold text-gray-700 shadow-sm backdrop-blur-md transition-all hover:bg-white/80 hover:shadow-md active:scale-95"
+            >
+              Log Out 👋
+            </button>
+          )}
+        </div>
 
         {/* Floating bubbles */}
         <Bubble size={64} color="#F97316" top="8%" left="5%" delay="0s" label="A" />

@@ -72,7 +72,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           disableTransitionOnChange
         >
           {/* BoloBuddy Header */}
-          <header className="fixed top-0 left-0 z-50 hidden w-full flex-row items-center justify-between px-6 py-4 md:flex">
+          <header className="pointer-events-none fixed top-0 left-0 z-50 hidden w-full flex-row items-center justify-between px-6 py-4 md:flex">
             <div className="flex items-center gap-2">
               <span className="text-2xl">🐥</span>
               <span className="text-xl font-black tracking-tight" style={{ color: '#F97316' }}>
@@ -85,7 +85,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
                 target="_blank"
                 rel="noopener noreferrer"
                 href="https://murf.ai"
-                className="underline underline-offset-4 transition-colors hover:text-orange-400"
+                className="pointer-events-auto underline underline-offset-4 transition-colors hover:text-orange-400"
               >
                 Murf Falcon TTS
               </a>

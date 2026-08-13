@@ -38,16 +38,71 @@ logging.basicConfig(
 load_dotenv(".env.local")
 
 # ---------------------------------------------------------------------------
-# MongoDB — lazy initialization to avoid asyncio loop conflicts across jobs
+# MongoDB — lazy initialization per event loop to avoid asyncio loop conflicts
 # ---------------------------------------------------------------------------
-_mongo_client = None
+_mongo_clients = {}
 
 def get_children_col():
-    global _mongo_client
-    if _mongo_client is None:
-        # Initialize lazily inside the active event loop
-        _mongo_client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URI"])
-    return _mongo_client["bolobuddy"]["children"]
+    import asyncio
+    loop = asyncio.get_running_loop()
+    if loop not in _mongo_clients:
+        _mongo_clients[loop] = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URI"])
+    return _mongo_clients[loop]["bolobuddy"]["children"]
+
+
+def get_calls_col():
+    import asyncio
+    loop = asyncio.get_running_loop()
+    if loop not in _mongo_clients:
+        _mongo_clients[loop] = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URI"])
+    return _mongo_clients[loop]["bolobuddy"]["calls"]
+
+
+# ---------------------------------------------------------------------------
+# Call analytics — persists one record per session to the calls collection
+# ---------------------------------------------------------------------------
+async def save_call_analytics(
+    assistant: "Assistant",
+    session_id: str,
+    channel: str = "browser",
+) -> None:
+    """Write exactly one call analytics document to the 'calls' collection.
+
+    Uses assistant.analytics_recorded flag to prevent duplicate writes.
+    Safe to call multiple times — only the first call writes to MongoDB.
+    """
+    if assistant.analytics_recorded:
+        logger.info("[analytics] Skipping duplicate write — already recorded.")
+        return
+
+    assistant.analytics_recorded = True
+
+    words_learned_count = len(assistant.learned_words)
+    outcome = "success" if words_learned_count >= 2 else "failed"
+
+    doc = {
+        "child_id": assistant._child_id,
+        "session_id": session_id,
+        "channel": channel,
+        "outcome": outcome,
+        "words_learned": words_learned_count,
+        "created_at": datetime.now(UTC),
+    }
+
+    logger.info(
+        f"[analytics] Saving call record: child_id={assistant._child_id!r} "
+        f"outcome={outcome!r} words_learned={words_learned_count} "
+        f"session_id={session_id!r}"
+    )
+
+    try:
+        col = get_calls_col()
+        await col.insert_one(doc)
+        logger.info("[analytics] Call record saved successfully.")
+    except Exception as exc:
+        logger.error(f"[analytics] Failed to save call record: {exc}")
+        # Reset flag so a retry is possible if something calls this again
+        assistant.analytics_recorded = False
 
 
 # ---------------------------------------------------------------------------
@@ -134,15 +189,28 @@ def build_system_prompt(memory: dict | None) -> tuple[str, str]:
 """
             greeting = f"Welcome, {name}! I am Chinnu from Bolo Buddy. Let's learn a fun new word today. Can you say Apple?"
         else:
+            # Deterministically pick a new word so we don't wait for them to say 'yes'
+            candidate_words = [
+                ("Banana", "A banana is a long yellow fruit that monkeys love to eat."),
+                ("Cat", "A cat is a small furry animal that says meow."),
+                ("Elephant", "An elephant is a very big animal with a long nose called a trunk."),
+                ("Fish", "A fish is an animal that lives and swims in the water."),
+                ("Grapes", "Grapes are small round fruits that grow in bunches."),
+                ("Ice cream", "Ice cream is a sweet and cold treat that melts in your mouth."),
+                ("Lion", "A lion is a big wild cat known as the king of the jungle."),
+                ("Monkey", "A monkey is a clever animal that loves to climb trees.")
+            ]
+            new_word, new_def = next((w for w in candidate_words if w[0].lower() not in [word.lower() for word in words_learned]), candidate_words[0])
+            
             memory_context = f"""
 ## CHILD MEMORY STATUS: RETURNING CHILD ✅
 - Child's name: {name}
 - Last session: {last_interaction}
 - ALL words learned so far (do NOT teach these): {words_str}
 - Words with mistakes: {mistakes_str}
-- Then immediately suggest a NEW word they have NOT learned yet (avoid repeating words from the ALL words learned list above).
+- You have just started teaching them the word "{new_word}". Wait for them to try saying it!
 """
-            greeting = f"Welcome back, {name}! I remember you learned {recent_words_str}. Today, let's learn something new!"
+            greeting = f"Welcome back, {name}! I remember you learned {recent_words_str}. Today, let's learn a new word: {new_word}! {new_def} Can you say {new_word}?"
 
     prompt = f"""
 # IDENTITY
@@ -168,7 +236,7 @@ You are not a teacher. You are a patient learning buddy who helps children feel 
 - MAX ATTEMPTS: Ask the child to say the target word a maximum of 3 times. If they say it correctly, or if you have practiced it 3 times (even with mistakes), stop asking them to repeat it and move on. Do NOT ask them to say the same word more than 3 times.
 - Celebrate every attempt with phrases like "Very good!" or "You said it very well!"
 - Do not use "Yayy" or "Wow".
-- KEEP GOING: Never say goodbye or try to end the conversation unless the child says bye first. Always keep the learning going!
+- KEEP GOING: Never say goodbye or try to end the conversation unless the child says bye first OR the child says no to continuing after completing the daily exercise.
 
 # KNOWLEDGE SCOPE
 
@@ -190,9 +258,10 @@ Do not provide medical, legal, psychological, developmental, parenting, or advan
 # LANGUAGE
 
 - Detect the language used by the child.
-- Reply in the same language.
+- Reply ONLY in the same language. 
+- If the child speaks English, you MUST speak English. If they speak Telugu, you MUST speak Telugu.
 - For code-mixed speech, mirror the child's language mix.
-- Never switch languages unless the child does.
+- Never switch languages unless the child does. If the child switches to English, immediately switch to English.
 - Always write non-English languages in their native script, even when the child's speech is transcribed in Roman letters.
 - Hindi → Devanagari.
 - Telugu → Telugu script.
@@ -247,7 +316,22 @@ When the child successfully learns a new word, OR after you have practiced a wor
 3. Listen to their response.
 4. Call record_consent_decision(granted=True) if they clearly say yes (e.g. "yes", "okay", "sure", "ha").
    Call record_consent_decision(granted=False) if they say no, are silent, or are unsure.
-5. ONLY if granted=True, call update_child_memory(). Respect their answer always.
+5. ONLY if granted=True, call update_child_memory(word_learned=...). Respect their answer always.
+
+# DAILY EXERCISE — 2 WORD GOAL
+
+Each session has a daily exercise goal: help the child successfully learn 2 unique words.
+
+When the update_child_memory() tool returns a message containing "DAILY EXERCISE COMPLETE", it means the child has reached the 2-word goal for today.
+
+At that point you MUST:
+1. Warmly congratulate the child: say something like "Amazing! You have successfully completed today's exercise!"
+2. Ask: "Would you like to learn more?"
+3. Wait for the child's answer.
+   - If the child says YES (or yes/ha/okay/sure): continue teaching more words naturally. The exercise is already complete — do not reset.
+   - If the child says NO (or no/nahi/bye/stop): give a warm goodbye and end the conversation naturally.
+4. Do NOT automatically end the conversation without asking.
+5. Do NOT continue without asking.
 
 # GUARDRAILS
 
@@ -260,8 +344,9 @@ Never:
 - Answer questions outside early language learning.
 - Break character or claim to be an AI.
 - Say "Wrong" or "No" when correcting the child.
+- Say "Very good!" or congratulate the child if they just asked a question (e.g., "Can you teach me banana?"). ONLY congratulate them if they actually attempted to pronounce the target word.
 
-Instead, encourage another attempt gently.
+Instead, encourage another attempt gently, or answer their question naturally.
 
 For medical or developmental questions, say:
 
@@ -299,6 +384,9 @@ class Assistant(Agent):
         super().__init__(instructions=prompt)
         self._child_id = child_id
         self.consent_state = "NO_CONSENT"
+        # Day 8: session-scoped word tracking
+        self.learned_words: set[str] = set()
+        self.analytics_recorded: bool = False
 
     @function_tool
     async def request_memory_save_consent(self, context: RunContext) -> str:
@@ -437,7 +525,7 @@ class Assistant(Agent):
         update_doc: dict = {"$set": {"last_interaction": datetime.now(UTC)}}
 
         if word_learned:
-            # $addToSet prevents duplicates
+            # $addToSet prevents duplicates in long-term memory
             update_doc["$addToSet"] = {"words_learned": word_learned.lower().strip()}
 
         if language_preference:
@@ -465,7 +553,33 @@ class Assistant(Agent):
 
         logger.info(f"[memory] Memory updated successfully for child_id={child_id}")
         self.consent_state = "NO_CONSENT"
-        return '{"success": true}'
+
+        # ── Day 8: Track session-level learned words ────────────────────────
+        # Only track when a real word_learned was successfully persisted.
+        # The set deduplicates automatically — adding the same word twice is a no-op.
+        milestone_msg = ""
+        if word_learned:
+            normalized = word_learned.lower().strip()
+            before_count = len(self.learned_words)
+            self.learned_words.add(normalized)
+            after_count = len(self.learned_words)
+
+            logger.info(
+                f"[analytics] learned_words={self.learned_words} "
+                f"(before={before_count}, after={after_count})"
+            )
+
+            # Trigger the 2-word milestone exactly once (when crossing from 1 → 2)
+            if before_count < 2 and after_count >= 2:
+                milestone_msg = (
+                    " DAILY EXERCISE COMPLETE: The child has now successfully learned "
+                    f"{after_count} unique words this session. "
+                    "Tell the child they have completed today's exercise and ask: "
+                    "'Would you like to learn more?'"
+                )
+                logger.info("[analytics] 2-word milestone reached — milestone message appended.")
+
+        return '{"success": true}' + milestone_msg
 
 
 # ---------------------------------------------------------------------------
@@ -621,11 +735,16 @@ async def my_agent(ctx: JobContext):
         preemptive_generation=False,
     )
 
+    # ── Create the assistant instance (shared across start + close handler) ─
+    assistant = Assistant(child_id=child_id, prompt=system_prompt)
+    channel = "sip" if is_outbound else "browser"
+    session_id = ctx.room.name or ""
+
     if is_outbound:
         # NOTE: Noise cancellation is disabled for SIP/phone calls on Windows
         # because BVCTelephony() causes a livekit_ffi audio_stream crash.
         await session.start(
-            agent=Assistant(child_id=child_id, prompt=system_prompt),
+            agent=assistant,
             room=ctx.room,
             room_options=room_io.RoomOptions(
                 audio_input=room_io.AudioInputOptions(
@@ -636,7 +755,7 @@ async def my_agent(ctx: JobContext):
     else:
         # Web sessions use BVC noise cancellation
         await session.start(
-            agent=Assistant(child_id=child_id, prompt=system_prompt),
+            agent=assistant,
             room=ctx.room,
             room_options=room_io.RoomOptions(
                 audio_input=room_io.AudioInputOptions(
@@ -644,6 +763,27 @@ async def my_agent(ctx: JobContext):
                 ),
             ),
         )
+
+    # ── Day 8: Attach session-end analytics handler ─────────────────────────
+    # session.on() requires a synchronous callback; async work must be
+    # dispatched via asyncio.create_task inside the sync handler.
+    import asyncio as _asyncio
+
+    def _on_session_close(event) -> None:  # noqa: ANN001
+        """Synchronous close handler — schedules async analytics save."""
+        logger.info(
+            f"[analytics] Session close event received for "
+            f"child_id={child_id!r} session_id={session_id!r}"
+        )
+        _asyncio.create_task(
+            save_call_analytics(
+                assistant=assistant,
+                session_id=session_id,
+                channel=channel,
+            )
+        )
+
+    session.on("close", _on_session_close)
 
     # ── Make the agent greet the child immediately ────────
     # We use session.say() to synthesize and play the greeting string deterministically,

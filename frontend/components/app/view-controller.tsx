@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { useSessionContext, useAgent } from '@livekit/components-react';
 import type { AppConfig } from '@/app-config';
@@ -193,10 +194,11 @@ interface ViewControllerProps {
   appConfig: AppConfig;
 }
 
-// 'auth' is the gate before welcome — requires login/signup
+// 'auth' is the gate before welcome -- requires login/signup
 type AppView = 'auth' | 'welcome' | 'connecting' | 'session' | 'ended';
 
 export function ViewController({ appConfig }: ViewControllerProps) {
+  const router = useRouter();
   const { isConnected, start, end } = useSessionContext();
   const { state: agentState } = useAgent();
   const [view, setView] = useState<AppView>('auth');
@@ -284,15 +286,21 @@ export function ViewController({ appConfig }: ViewControllerProps) {
     setView('auth');
   };
 
-  // ── Mic error screen ─────────────────────────────────────────────────────
+  const handleShowDashboard = () => {
+    router.push('/dashboard');
+  };
+
+  // -- Mic error screen -------------------------------------------------------
   if (micError) {
     return <MicPermissionError onRetry={handleRetryMic} />;
   }
 
-  // ── Auth gate ─────────────────────────────────────────────────────────────
+  // -- Auth gate ---------------------------------------------------------------
   if (view === 'auth') {
     return <LoginView onAuthenticated={handleAuthenticated} />;
   }
+
+
 
   // ── Connecting overlay ────────────────────────────────────────────────────
   if (view === 'connecting' && !isConnected) {
@@ -315,6 +323,7 @@ export function ViewController({ appConfig }: ViewControllerProps) {
           childName={authedChild?.name}
           onStartCall={handleStartCall}
           onLogout={handleLogout}
+          onDashboard={handleShowDashboard}
         />
       )}
 

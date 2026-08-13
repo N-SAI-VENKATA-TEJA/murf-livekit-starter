@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
 import { RoomConfiguration } from '@livekit/protocol';
-import { verifySessionCookie } from '../auth/route';
+import { verifySessionCookie } from '@/lib/session';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
 
-    // ── Verify child session ─────────────────────────────────────────────────
+    // -- Verify child session -------------------------------------------------
     const session = await verifySessionCookie(req);
     if (!session) {
       return new NextResponse('Unauthorized: Please log in to start a session.', { status: 401 });
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Use child_id as participant identity (backend will read this to load memory) ──
+    // -- Use child_id as participant identity (backend will read this to load memory) --
     const participantIdentity = child_id;
     const participantName = name;
     const roomName = `bb_room_${child_id}_${Math.floor(Math.random() * 10_000)}`;
