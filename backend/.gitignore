@@ -32,3 +32,6 @@ KMS
 
 # GitHub CLI
 .github/personal-instructions.md
+
+# Logs and debug
+agent_session_help.txt
