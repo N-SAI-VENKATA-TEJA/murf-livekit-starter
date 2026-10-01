@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.git
+.gitignore
+.env
+.env.*
+README.md
+LICENSE
+.github/
+.vscode/
+.idea/
+.DS_Store
+*.log
