@@ -833,7 +833,7 @@ async def my_agent(ctx: JobContext):
             text_pacing=True,
         ),
         # Turn detection and VAD
-        turn_detection=MultilingualModel(),
+        # turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         # Disable preemptive generation so the LLM always uses the
         # full memory-aware system prompt before starting to speak.
